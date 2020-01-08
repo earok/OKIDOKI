@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "OKIDOKI": {
+      "commandName": "Project",
+      "commandLineArgs": "db_03.bin"
+    }
+  }
+}
