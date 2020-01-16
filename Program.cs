@@ -1,4 +1,5 @@
-﻿using System;
+﻿using NAudio.Wave;
+using System;
 using System.Collections.Generic;
 using System.IO;
 
@@ -17,61 +18,133 @@ namespace OKIDOKI
                 Functions.ComputeTables();
 
                 Console.WriteLine("OKIDOKI 6295 sample ripper");
-                Console.WriteLine("Assumes locations of all samples are at top of ROM file");
+                Console.WriteLine("Rip mode assumes locations of all samples are at top of ROM file");
 
                 if (args.Length == 0)
                 {
                     throw new Exception("File name must be specified in command line, otherwise drag+drop file here");
                 }
 
-                var fileBytes = File.ReadAllBytes(args[0]);
-
-                Console.WriteLine("HZ of samples? (Default: " + DefaultHZ + ")");
-                var hzString = Console.ReadLine();
-
-                int hz;
-                if (!int.TryParse(hzString, out hz))
+                var fileName = args[0];
+                Console.WriteLine("Import mode (i) or Rip mode (any key)?");
+                var keyInfo = Console.ReadKey();
+                Console.WriteLine("");
+                if (keyInfo.Key == ConsoleKey.I)
                 {
-                    hz = DefaultHZ;
+                    ImportMode(fileName);
                 }
-                var samples = GetSampleMetaData(fileBytes);
-                samples.Sort(OKISample.Sorter);
-
-                var sampleTableError = false;
-                for (var i = 0; i < samples.Count - 1; i++)
+                else
                 {
-                    var firstSample = samples[i];
-
-                    for (var j = i + 1; j < samples.Count; j++)
-                    {
-                        var secondSample = samples[j];
-                        if (secondSample.StartAddress <= firstSample.EndAddress)
-                        {
-                            sampleTableError = true;
-                        }
-                    }
+                    RipMode(fileName);
                 }
-
-                if (sampleTableError)
-                {
-                    Console.WriteLine("Error processing sample table. Attempting autorip");
-                    samples = GetSampleMetaData_AutoRip(fileBytes);
-                }
-
-                foreach (var sample in samples)
-                {
-                    sample.Export(hz, fileBytes);
-                }
-
-                Console.WriteLine("Success! Converted " + ExportedSamples + " samples");
             }
             catch (Exception ex)
             {
                 Console.WriteLine(ex.ToString());
             }
+            Console.WriteLine("Press any key to exit");
             Console.ReadKey();
         }
-        
+
+        private static void ImportMode(string fileName)
+        {
+            Console.WriteLine("Looking for suitably named WAV files to import into file");
+            Console.WriteLine("ie [STARTOFFSET]-[ENDOFFSET].wav");
+            var bytes = File.ReadAllBytes(fileName);
+
+            var path = Path.GetDirectoryName(fileName);
+            if (string.IsNullOrEmpty(path)) path = ".";
+            foreach (var file in Directory.GetFiles(path))
+            {
+                if (!file.ToLower().EndsWith(".wav")) continue;
+                var wavFile = Path.GetFileNameWithoutExtension(file).ToLower();
+
+                var split = wavFile.Split("-");
+                if (split.Length != 2) continue;
+                Console.WriteLine("Importing " + file);
+
+                var startOffset = 0;
+                var endOffset = 0;
+                if (!int.TryParse(split[0], out startOffset)) continue;
+                if (!int.TryParse(split[1], out endOffset)) continue;
+
+                using var reader = new WaveFileReader(file);
+                var format = reader.WaveFormat;
+                if (format.BitsPerSample != 16) throw new Exception("WAV file must be 16 bit: " + file);
+                if (format.Channels != 1) throw new Exception("WAV file must be mono: " + file);
+
+                var buffer = new Byte[reader.Length];
+                reader.Read(buffer, 0, buffer.Length);
+
+                //Convert to 16 bit
+                var samples = new short[buffer.Length / 2];
+                for(var i = 0;i < buffer.Length;i += 2)
+                {
+                    samples[i / 2] = (short)(buffer[i + 1] << 8 | buffer[i]);
+                }
+
+                //Read
+                Functions.Reset();
+                for (var i = 0; i < samples.Length; i += 2)
+                {
+                    //Read two samples per byte, converting from 16bit to 12bit
+                    var sample1 = Functions.encode((short)(samples[i] >> 4));
+                    var sample2 = Functions.encode((short)(samples[i + 1] >> 4));
+
+                    bytes[startOffset] = (byte)((sample1 << 4) | sample2);
+                    startOffset += 1;
+                    if (startOffset > endOffset) break;
+                }
+
+            }
+
+            File.WriteAllBytes(fileName, bytes);
+        }
+
+        private static void RipMode(string fileName)
+        {
+            var fileBytes = File.ReadAllBytes(fileName);
+
+            Console.WriteLine("HZ of samples? (Default: " + DefaultHZ + ")");
+            var hzString = Console.ReadLine();
+
+            int hz;
+            if (!int.TryParse(hzString, out hz))
+            {
+                hz = DefaultHZ;
+            }
+            var samples = GetSampleMetaData(fileBytes);
+            samples.Sort(OKISample.Sorter);
+
+            var sampleTableError = false;
+            for (var i = 0; i < samples.Count - 1; i++)
+            {
+                var firstSample = samples[i];
+
+                for (var j = i + 1; j < samples.Count; j++)
+                {
+                    var secondSample = samples[j];
+                    if (secondSample.StartAddress <= firstSample.EndAddress)
+                    {
+                        sampleTableError = true;
+                    }
+                }
+            }
+
+            if (sampleTableError)
+            {
+                Console.WriteLine("Error processing sample table. Attempting autorip");
+                samples = GetSampleMetaData_AutoRip(fileBytes);
+            }
+
+            foreach (var sample in samples)
+            {
+                sample.Export(hz, fileBytes);
+            }
+
+            Console.WriteLine("Success! Converted " + ExportedSamples + " samples");
+        }
+
         private static List<OKISample> GetSampleMetaData_AutoRip(byte[] fileBytes)
         {
             var result = new List<OKISample>();
@@ -93,7 +166,7 @@ namespace OKIDOKI
                 }
                 else
                 {
-                    if(isReading)
+                    if (isReading)
                     {
                         result.Add(new OKISample() { StartAddress = startAddress, EndAddress = i - 1 });
                         isReading = false;

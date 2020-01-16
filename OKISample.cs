@@ -22,8 +22,6 @@ namespace OKIDOKI
         internal void Export(int hz, byte[] fileBytes)
         {
             var samples = new List<short>();
-            if (isRedundant) return;
-
             Functions.Reset();
 
             for(var i = StartAddress;i <= EndAddress;i++)
