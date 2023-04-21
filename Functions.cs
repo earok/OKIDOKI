@@ -84,7 +84,7 @@ namespace OKIDOKI
                 m_step = 0;
 
             // return the signal
-            return (short)(m_signal * 16);
+            return (short)(m_signal * 6);
         }
 
         internal static bool EmptyLine(byte[] fileBytes, int i)
